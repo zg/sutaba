@@ -1679,3 +1679,17 @@ if(isset($_CLEAN['GET']['action']))
 $output = ob_get_contents();
 ob_end_clean();
 
+//**************************** VIEW ****************************
+?>
+<html>
+<head>
+<title><?php echo $cfg[$board]['title']; echo (strlen($cfg[$board]['desc']) > 0 ? $cfg[$board]['desc'] : ''); ?></title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type=text/css><!--body,td{background:#B2B292;font-family:arial;font-size:13px}form{margin:0px;padding:0px}a{color:#000;text-decoration:none}a:hover{color:#F00;text-decoration:none}input#moderate_input{font-size:10px}.t a:hover{color:#D3D3AB}#a{color:#CC1105}#q{color:#789922}#u0{color:#117743}#u0 a,#u1 a,#u2 a{color:#0000FF;text-decoration:underline}#u1{color:#FF0000}#u2{color:#800080}.td1{background:#FFFFCC}.td2{background:#D3D3AB}.ls{font-weight:normal}.ls a:hover{color:#D3D3AB}.c0{background:#99FFCC}.c16{background:#CCCC99}.c2{background:#CCCCCC}.c3{background:#CCCCFF}.c4{background:#CCFF99}.c5{background:#CCFFCC}.c6{background:#CCFFFF}.c7{background:#FFCC99}.c8{background:#FFCCCC}.c9{background:#FFCCFF}.c10{background:#FFFF99}.c11{background:#FFFFCC}.w{background:#FFF}.tbl{border-collapse:collapse;border-color:#000}.r{float:right}.b{margin-bottom:5px}.p{font-size:16px}#msg p{margin:6px 0px}.r0{background-color:#FFE5E5}.r1{background-color:#FFCCCC}.r2{background-color:#FFB2B2}.r3{background-color:#FF9999}.r4{background-color:#FF7F7F}.r5{background-color:#FF6666}.r6{background-color:#FF4C4C}.r7{background-color:#FF3232}.r8{background-color:#FF1919}.r9{background-color:#FF0000}--></style>
+<script type=text/javascript src=jquery.js></script>
+<script type=text/javascript src=main.js></script>
+</head>
+<body>
+<?php echo $output; ?>
+</body>
+</html>

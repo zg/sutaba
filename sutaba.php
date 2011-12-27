@@ -1027,3 +1027,161 @@ class common {
 	}
 }
 
+class HTML {
+	public function build_form($thread_data=false)
+	{
+		global $cfg,$board,$_CLEAN,$common,$Sutaba;
+		$name = (isset($_SESSION[$board]['name']) ? $_SESSION[$board]['name'] : $cfg[$board]['guest_name']);
+		$email = (isset($_SESSION[$board]['email']) ? $_SESSION[$board]['email'] : '');
+		$form = "<form method=post name=form enctype=multipart/form-data>";
+			$form .= "<table>";
+				$form .= "<tr><td>Name</td><td><input type=text name=name size=32 value=\"{$name}\"></td></tr>";
+				$form .= "<tr><td>E-mail</td><td><input type=text name=email size=32 maxlength=100 value=\"$email\"></td></tr>";
+				$form .= "<tr><td>Subject</td><td><input type=text name=subject size=32 maxlength=100><input type=submit value=Submit>";
+				$form .= "<input type=hidden name=action value=post />";
+				if($thread_data !== false && isset($thread_data['id']))
+					$form .= "<input type=hidden name=parent_id value={$thread_data['id']} />";
+				$form .= "</td></tr>";
+				$form .= "<tr><td>Message</td><td><textarea name=comment cols=58 rows=5></textarea></td></tr>";
+				$form .= "<tr><td>File</td><td><input type=file name=file size=75></td></tr>";
+				$form .= "<tr><td>Password</td><td><input type=password name=password value={$_SESSION[$board]['password']} /> <small>(for post and file deletion)</small></td></tr>";
+				if($common->is_staff())
+				{
+					$form .= "<tr>";
+					$form .= "<td>Moderation</td>";
+					$form .= "<td>";
+					$form .= "<input type=checkbox name=locked".($thread_data['locked'] == 1 ? " checked" : "")." value=1 /> Lock Thread";
+					if($common->is_admin())
+						$form .= "<br /><input type=checkbox name=pinned".($thread_data['pinned'] == 1 ? " checked" : "")." value=1 /> Pin Thread";
+					$form .= "</td>";
+					$form .= "</tr>";
+				}
+			$form .= "</table>";
+		$form .= "</form>";
+		return $form;
+	}
+
+	public function build_menu()
+	{
+		global $common,$cfg,$board;
+		$menu_items = array();
+		foreach($cfg as $board_name => $board_data)
+		{
+			$menu_items[] = '[ <a href=?board='.$board_name.'>'.$board_data['title'].'</a> ]';
+		}
+		if($common->is_staff())
+			$menu_items[] = '[ <a href=?action=manage>manage</a> ]';
+		$menu_items[] = '[ <a href=/releases/>releases</a> ]';
+		return (0 < count($menu_items) ? implode(' ',$menu_items) : '');
+	}
+
+	public function build_post(array $data)
+	{
+		global $cfg,$board,$Sutaba,$common;
+		$data['comment'] = str_replace(array("&lt;pre&gt;","&lt;/pre&gt;"),array('<pre>','</pre>'),$data['comment']);
+		/* quoting */
+		if(preg_match_all('/&gt;&gt;(\d+)/',$data['comment'],$quoted_text_match))
+		{
+			foreach($quoted_text_match[1] as $key => $quoted_post_id)
+			{
+				if($Sutaba->is_thread($quoted_post_id))
+				{
+					$data['comment'] = str_replace($quoted_text_match[0][$key],'<a href='.$cfg[$board]['webpath'].'?action=view_thread&thread_id='.$quoted_post_id.'>>>'.$quoted_post_id.'</a>',$data['comment']);
+				}
+				elseif($Sutaba->is_post($quoted_post_id))
+				{
+					$post_data = $Sutaba->get_post($quoted_post_id);
+					$data['comment'] = str_replace($quoted_text_match[0][$key],'<a href='.$cfg[$board]['webpath'].'?action=view_thread&thread_id='.$post_data['parent_id'].'#'.$quoted_post_id.'>>>'.$quoted_post_id.'</a>',$data['comment']);
+				}
+				else
+				{
+					$data['comment'] = str_replace($quoted_text_match[0][$key],'<b id=q>>>'.$quoted_post_id.'</b>',$data['comment']);
+				}
+			}
+		}
+
+		if(preg_match_all('/^&gt;(.+)/',$data['comment'],$quoted_text_match))
+			foreach($quoted_text_match[1] as $key => $quoted_post_id)
+				$data['comment'] = str_replace($quoted_text_match[0][$key],'<b id=q>>'.$quoted_post_id.'</b>',$data['comment']);
+
+		//parse URLs
+		//$data['comment'] = preg_replace('@(https?://([-\w\.]+)+(:\d+)?(/([\w/_\.]*(\?\S+)?)?)?)@', '<a href="$1">$1</a>',$data['comment']);
+		$query = mysql_query('SELECT word,replacement FROM wordfilter WHERE board = "'.$board.'" ORDER BY id ASC');
+		if(0 < mysql_num_rows($query))
+			while($result = mysql_fetch_assoc($query))
+				$data['comment'] = str_replace($result['word'],$result['replacement'],$data['comment']);
+
+		$data['name'] = ($data['name'] == "Anonymous" ? '<b id=c>'.$data['name'].'</b>' : $data['name']);
+
+		$return = "<a name={$data['id']}></a>";
+		$return .= "<table width=100% border=1 cellpadding=5 class=tbl>";
+		$return .= "<tr>";
+		$return .= "<td class=td2>";
+
+		$link = $cfg[$board]['webpath'].'?action=view_thread&thread_id='.($data['parent_id'] == 0 ? $data['id'] : $data['parent_id']).'#'.$data['id'];
+
+		$return .= "<input type=checkbox name=posts[] value={$data['id']}>";
+		$return .= '<a href='.$link.'>No.</a> ';
+		$return .= '<a href=javascript:Main.quote(\''.$data['id'].'\')>';
+			$return .= $data['id'];
+		$return .= '</a> ';
+
+		$return .= '<b id=a>'.$data['subject'].'</b>';
+
+		if(strpos($data['name'],'#'))
+			list($name,$tripcode) = explode('#',$data['name'],2);
+		else
+			$name = $data['name'];
+
+		if(isset($tripcode) && in_array($tripcode,$cfg[$board]['access']['admin']))
+			$return .= ' <b id=u1>'.($data['email'] !== '' ? '<a href=mailto:'.$data['email'].'>' : '').$name.($data['email'] !== '' ? '</a>' : '').'</b><span id=u0>'.(isset($tripcode) ? ' !'.$tripcode : '').'</span> <b id=u2>## Admin ##</b> ';
+		else
+			$return .= ' <b id=u0>'.($data['email'] !== '' ? '<a href=mailto:'.$data['email'].'>' : '').$name.($data['email'] !== '' ? '</a>' : '').'</b><span id=u0>'.(isset($tripcode) ? ' !'.$tripcode : '').'</span> ';
+		if(isset($tripcode) && in_array($tripcode,$cfg[$board]['access']['mod']))
+			$return .= '<b id=u1>## Mod ##</b> ';
+
+		$return .= date($cfg[$board]['datetime_format'],$data['time']);
+
+		if($data['locked'] == 1 && $data['parent_id'] == 0)
+			$return .= ' <img src=lock.gif title=Locked width=10 height=10 alt=L>';
+		if($data['pinned'] == 1 && $data['parent_id'] == 0)
+			$return .= ' <img src=pin.gif title=Pinned width=10 height=10 alt=P>';
+
+		if($cfg[$board]['img']['enabled'] === true)
+		{
+			if(0 < strlen($data['file']))
+			{
+				$query = mysql_query('SELECT * FROM images WHERE filename = "'.$data['file'].'" LIMIT 1');
+				if(0 < mysql_num_rows($query))
+				{
+					while($result = mysql_fetch_assoc($query))
+					{
+						$return .= '</td></tr><tr><td class=td1>File: <a href='.$cfg[$board]['imgpath'].$data['file'].'>';
+							$return .= $data['file'];
+						$return .= '</a> - ';
+							$return .= $common->format_size($result['size']).', ';
+							$return .= $result['width'].'x'.$result['height'];
+					}
+				}
+			}
+		}
+		$return .= '</td></tr>';
+		$return .= '<tr><td class="td1'.(isset($data['report_count']) ? (0 < $data['report_count'] ? (10 < $data['report_count'] ? ' r9' : ' r'.$data['report_count']) : '') : '').'" valign=top>';
+		if($cfg[$board]['img']['enabled'] === true)
+			if(0 < strlen($data['file'])){
+				$return .= '<a href='.$cfg[$board]['imgpath'].$data['file'].'>';
+					$return .= '<img src='.$cfg[$board]['thumbpath'].$data['file'].' style=float:left;margin-right:5px border=0 alt=>';
+				$return .= '</a>';
+			}
+
+		/* short br tags to save bandwidth, allow ppl to use <pre> for code */
+		$return .= stripslashes(str_replace(array("\n","\r","<br />"),array("","","<br>"),nl2br($data['comment'])));
+		$sql = "SELECT id FROM bans WHERE board = '$board' AND post_id = '{$data['id']}'";
+		$query = mysql_query($sql);
+		if(0 < mysql_num_rows($query))
+			$return .= '<br><br><b><font color=red>(USER WAS BANNED FOR THIS POST.)</font></b>';
+		$return .= '</td></tr></table>';
+		return $return;
+	}
+}
+

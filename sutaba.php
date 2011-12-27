@@ -1211,3 +1211,471 @@ $common = new common();
 $_CLEAN['GET'] = $common->clean($_GET);
 $_CLEAN['POST'] = $common->clean($_POST);
 
+//**************************** MODEL ****************************
+// determine whether the client can view any boards
+$board = 0; // default board
+$board_changed = false; // the board was changed
+foreach($cfg as $board_id => $board_data) //get the first valid board they can visit
+{
+	if(!$common->has_permission($board_id))
+		continue;
+	$board_changed = true;
+	$board = $board_id;
+	break;
+}
+if($board_changed === false) // they can't view any boards; exit immediately (IP-restricted board or tripcode-restricted board)
+	die("You don't have permission to view any boards.");
+
+if(isset($_CLEAN['GET']['board']) && isset($cfg[$_CLEAN['GET']['board']]) && $common->has_permission($_CLEAN['GET']['board'])) // client is requesting to view a different board
+	$_SESSION['board'] = $_CLEAN['GET']['board'];
+elseif(isset($_CLEAN['GET']['board']) && !$common->has_permission($_CLEAN['GET']['board']))
+	$common->redirect('error=board_not_found');
+elseif(isset($_CLEAN['GET']['board']) && !isset($cfg[$_CLEAN['GET']['board']]))
+	$common->redirect('error=board_not_found');
+
+if(!isset($_SESSION['board']) || !isset($cfg[$_SESSION['board']]) || !$common->has_permission($_SESSION['board']))
+	$_SESSION['board'] = $board;
+
+$board = $_SESSION['board'];
+
+$common->errors['subject_length'] = 'Your subject must be at least '.$cfg[$board]['subject_min'].' characters long (not including whitespace).';
+$common->errors['comment_length'] = 'Your comment must be at least '.$cfg[$board]['comment_min'].' characters long (not including whitespace).';
+$common->errors['subject_too_long'] = 'Your subject must be less than '.$cfg[$board]['subject_max'].' characters long.';
+$common->errors['comment_too_long'] = 'Your comment must be less than '.$cfg[$board]['comment_max'].' characters long.';
+$Sutaba = new Sutaba($board);
+$Sutaba->cleanup_bans();
+$Sutaba->cleanup_reports();
+$Sutaba->cleanup_spam();
+$HTML = new HTML($Sutaba);
+$paginate = new paginate();
+
+$hr = '<hr noshade color=black size=1>';
+
+$_CLEAN['POST']['action'] = (isset($_CLEAN['POST']['action']) ? $_CLEAN['POST']['action'] : '');
+$_CLEAN['GET']['action'] = (isset($_CLEAN['GET']['action']) ? $_CLEAN['GET']['action'] : '');
+
+if($Sutaba->is_banned())
+{
+	$ban_data = $Sutaba->get_bans($_SERVER['REMOTE_ADDR']);
+	echo '<h1><font color="red">BANNED</font></h1>';
+	echo '<p>Your IP ('.$ban_data['ip'].') was banned on '.date('F j, Y \a\t h:i:s A',$ban_data['time']).' for the reason:</p>';
+	echo '<p><b>'.$ban_data['reason'].'</b></p>';
+	echo '<p>Your ban will '.($ban_data['expires'] == 0 ? 'never expire.' : 'expire on '.date('F j, Y \a\t h:i:s A',$ban_data['expires'])).'</p>';
+	exit;
+}
+
+if(isset($_CLEAN['POST']['action']))
+{
+	switch($_CLEAN['POST']['action'])
+	{
+		case 'post':
+			$Sutaba->create_post($_CLEAN['POST']);
+		break;
+		case 'Ban':
+			var_dump($_CLEAN['POST']);
+			$post_data = array();
+			if(isset($_CLEAN['POST']['posts']) && is_array($_CLEAN['POST']['posts']))
+			{
+				foreach($_CLEAN['POST']['posts'] as $post_id)
+					if(is_numeric($post_id))
+						$post_data[$post_id] = $Sutaba->get_post($post_id);
+			}
+			elseif(isset($_CLEAN['POST']['users']) && is_array($_CLEAN['POST']['users']) && isset($_CLEAN['POST']['expires']) && isset($_CLEAN['POST']['reason']))
+			{
+				foreach($_CLEAN['POST']['users'] as $post_id => $ip)
+					if(is_numeric($post_id))
+						$Sutaba->ban_user($ip,$post_id,$_CLEAN['POST']['expires'],$_CLEAN['POST']['reason']);
+				$common->redirect("",true);
+			}
+			if(count($post_data) > 0)
+			{
+				$ips = array();
+				foreach($post_data as $post_id => $data)
+					if(!in_array($data['ip'],$ips))
+						$ips[$post_id] = $data['ip'];
+				echo '<h3>Are you sure you want to ban the creators of these posts? '.implode(',',$_CLEAN['POST']['posts']).'</h3>';
+				echo '<form method=post>';
+					echo '<table>';
+						echo '<tr><td>Reason</td><td><input type=text name=reason size=50></td></tr>';
+						echo '<tr>';
+							echo '<td>Expires</td>';
+							echo '<td>';
+								echo '<select name=expires>';
+									echo '<option value='.(60 * 60).'>An hour</option>';
+									echo '<option value='.(60 * 60 * 6).'>Six hours</option>';
+									echo '<option value='.(60 * 60 * 24).'>A day</option>';
+									echo '<option value='.(60 * 60 * 24 * 2).'>Two days</option>';
+									echo '<option value='.(60 * 60 * 24 * 5).'>Five days</option>';
+									echo '<option value='.(60 * 60 * 24 * 7).'>A week</option>';
+									echo '<option value='.(60 * 60 * 24 * 7 * 2).'>Two weeks</option>';
+									echo '<option value='.(60 * 60 * 24 * 7 * 4).'>One month</option>';
+									echo '<option value='.(60 * 60 * 24 * 7 * 4 * 6).'>Six months</option>';
+									echo '<option value='.(60 * 60 * 24 * 365).'>One year</option>';
+									echo '<option value=0>Never expires</option>';
+								echo '</select>';
+							echo '</td>';
+						echo '</tr>';
+						echo '<tr><td colspan=2><font color=red>All bans are logged.</font></b></td></tr>';
+						echo '<tr><td colspan=2>';
+						foreach($ips as $post_id => $ip)
+							echo '<input type=hidden name=users['.$post_id.'] value='.$ip.'>';
+						echo '<input type=hidden name=action value=Ban><input type=submit value=Submit>';
+						echo '</td></tr>';
+					echo '</table>';
+				echo '</form>';
+				echo $hr;
+			}
+			else
+				$common->redirect("");
+		break;
+		case 'Report':
+			if(isset($_CLEAN['POST']['posts']) && is_array($_CLEAN['POST']['posts']))
+				foreach($_CLEAN['POST']['posts'] as $post_id)
+					if(is_numeric($post_id))
+						$Sutaba->report_post($post_id);
+		break;
+		case 'Delete Post':
+			if(isset($_CLEAN['POST']['posts']) && is_array($_CLEAN['POST']['posts']) && (isset($_CLEAN['POST']['password']) || $common->is_staff()))
+			{
+				foreach($_CLEAN['POST']['posts'] as $post_id)
+					if(is_numeric($post_id))
+						$Sutaba->delete_post($post_id,(!isset($_CLEAN['POST']['password']) && $common->is_staff() ? false : $_CLEAN['POST']['password']));
+			}
+			elseif(!isset($_CLEAN['POST']['password']))
+				$common->redirect('error=password_missing',true);
+		break;
+		case 'Delete Image':
+			if(isset($_CLEAN['POST']['posts']) && is_array($_CLEAN['POST']['posts']) && (isset($_CLEAN['POST']['password']) || $common->is_staff()))
+			{
+				foreach($_CLEAN['POST']['posts'] as $post_id)
+					if(is_numeric($post_id))
+						$Sutaba->delete_image($post_id,(!isset($_CLEAN['POST']['password']) && $common->is_staff() ? false : $_CLEAN['POST']['password']));
+			}
+			elseif(!isset($_CLEAN['POST']['password']))
+				$common->redirect('error=password_missing',true);
+		break;
+		case 'Toggle Pin':
+			if(isset($_CLEAN['POST']['posts']) && is_array($_CLEAN['POST']['posts']))
+				foreach($_CLEAN['POST']['posts'] as $post_id)
+					if(is_numeric($post_id))
+						$Sutaba->toggle_thread_attributes($post_id,false,true);
+		break;
+		case 'Toggle Lock':
+			if(isset($_CLEAN['POST']['posts']) && is_array($_CLEAN['POST']['posts']))
+				foreach($_CLEAN['POST']['posts'] as $post_id)
+					if(is_numeric($post_id))
+						$Sutaba->toggle_thread_attributes($post_id,true);
+		break;
+	}
+}
+
+if(isset($_CLEAN['GET']['action']))
+{
+	switch($_CLEAN['GET']['action'])
+	{
+		case 'manage':
+			if(!$common->is_staff())
+				$common->redirect("");
+			echo "<b class=t><a href={$cfg[$board]['webpath']}>{$cfg[$board]['title']}</a></b>".(strlen($cfg[$board]['desc']) > 0 ? " - <small>{$cfg[$board]['desc']}</small>" : "");
+			echo $hr;
+			echo "<b class=ls>{$HTML->build_menu()}</b>";
+			echo $hr;
+			if(isset($_CLEAN['GET']['subaction']))
+			{
+				switch($_CLEAN['GET']['subaction'])
+				{
+					case 'Unban User':
+						if(isset($_CLEAN['POST']['users']) && is_array($_CLEAN['POST']['users']))
+							foreach($_CLEAN['POST']['users'] as $ip)
+								$Sutaba->unban_user($ip);
+						$sort = '';
+						$sortAD = '';
+						if(isset($_CLEAN['GET']['sort']) && isset($_CLEAN['GET']['sortAD']))
+						{
+							$sortAD = ($_CLEAN['GET']['sortAD'] == "a" ? "ASC" : "DESC");
+							switch($_CLEAN['GET']['sort'])
+							{
+								case 'time':
+								case 'ip':
+								case 'expires':
+									$sort = $_CLEAN['GET']['sort'];
+								break;
+							}
+						}
+						$bans = $Sutaba->get_bans(false,(1 < strlen($sort.' '.$sortAD) ? $sort.' '.$sortAD : false));
+						echo "<form method=post>";
+							echo "<p>";
+								echo "<table cellpadding=5 border=1 class=tbl>";
+								echo "<tr class=td2><th>&nbsp;</th><th>Board</th><th>IP</th><th>Banned on</th><th>Reason</th><th>Expires</th></tr>";
+								$count = 0;
+								if(count($bans) > 0)
+								{
+									foreach($bans as $ban_id => $ban)
+									{
+										echo "<tr>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2")."><input type=checkbox name=users[] value=".$ban['ip']."></td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$ban['board']."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$ban['ip']."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".date('F j, Y h:i:s A',$ban['time'])."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$ban['reason']."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$common->relative_time(date('F j, Y h:i:s A',$ban['expires']))."</td>";
+										echo "</tr>";
+										$count++;
+									}
+								}
+								else
+								{
+									echo "<tr><td class=td1 colspan=6>No banned users found.</td></tr>";
+								}
+								echo "</table>";
+							echo "</p>";
+							echo "<input type=submit name=action value=Unban>";
+						echo "</form>";
+					break;
+					case 'Reports':
+						if(isset($_CLEAN['POST']['reports']) && is_array($_CLEAN['POST']['reports']))
+							foreach($_CLEAN['POST']['reports'] as $post_id)
+								$Sutaba->delete_reports($post_id);
+						$sort = '';
+						$sortAD = '';
+						if(isset($_CLEAN['GET']['sort']) && isset($_CLEAN['GET']['sortAD']))
+						{
+							$sortAD = ($_CLEAN['GET']['sortAD'] == "a" ? "ASC" : "DESC");
+							switch($_CLEAN['GET']['sort'])
+							{
+								case 'post_id':
+								case 'time':
+								case 'ip':
+									$sort = $_CLEAN['GET']['sort'];
+								break;
+							}
+						}
+						$reports = $Sutaba->get_reports((1 < strlen($sort.' '.$sortAD) ? $sort.' '.$sortAD : false));
+						echo "<form method=post>";
+							echo "<p>";
+								echo "<table cellpadding=5 border=1 class=tbl>";
+								echo "<tr class=td2><th>&nbsp;</th><th>Board</th><th>Post ID</th><th>Time</th><th>Reporter IPs</th></tr>";
+								$count = 0;
+								if(count($reports) > 0)
+								{
+									foreach($reports as $post_id => $report_data)
+									{
+										if($report_data['parent_id'] == 0)
+											$link = "?action=view_thread&thread_id=".$report_data['post_id'];
+										else
+											$link = "?action=view_thread&thread_id=".$report_data['parent_id']."#".$report_data['post_id'];
+										echo "<tr>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2")."><input type=checkbox name=reports[] value=".$report_data['post_id']."></td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$report_data['board']."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$report_data['post_id']." [<a href=$link target=_blank>Link</a>]</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".date('F j, Y h:i:s A',$report_data['time'])."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".implode(', ',$report_data['ip'])."</td>";
+										echo "</tr>";
+										$count++;
+									}
+								}
+								else
+								{
+									echo "<tr><td class=td1 colspan=5>No reports found.</td></tr>";
+								}
+								echo "</table>";
+							echo "</p>";
+							echo "<input type=submit name=action value='Clear reports'>";
+						echo "</form>";
+					break;
+					case 'Wordfilter':
+						if(isset($_CLEAN['POST']['wordfilters']) && is_array($_CLEAN['POST']['wordfilters']))
+							foreach($_CLEAN['POST']['wordfilters'] as $wordfilter_id)
+								$Sutaba->delete_wordfilter($wordfilter_id);
+						elseif(isset($_CLEAN['POST']['word']) && isset($_CLEAN['POST']['replacement']))
+							$Sutaba->add_wordfilter($_CLEAN['POST']['word'],$_CLEAN['POST']['replacement']);
+						$sort = '';
+						$sortAD = '';
+						if(isset($_CLEAN['GET']['sort']) && isset($_CLEAN['GET']['sortAD']))
+						{
+							$sortAD = ($_CLEAN['GET']['sortAD'] == "a" ? "ASC" : "DESC");
+							switch($_CLEAN['GET']['sort'])
+							{
+								case 'board':
+								case 'word':
+								case 'replacement':
+									$sort = $_CLEAN['GET']['sort'];
+								break;
+							}
+						}
+						$wordfilters = $Sutaba->get_wordfilters((1 < strlen($sort.' '.$sortAD) ? $sort.' '.$sortAD : false));
+						echo "<form method=post>";
+							echo "<p>";
+								echo "<table cellpadding=5>";
+								echo "<tr><td>Board</td><td>$board</td></tr>";
+								echo "<tr><td>Word</td><td><input type=text name=word /></td></tr>";
+								echo "<tr><td>Replacement</td><td><input type=text name=replacement /></td></tr>";
+								echo "<tr><td colspan=2><input type=submit value='Add Wordfilter' /></td></tr>";
+								echo "</table>";
+							echo "</p>";
+							echo "<p>";
+								echo "<table cellpadding=5 border=1 class=tbl>";
+								echo "<tr class=td2><th>&nbsp;</th><th>Board</th><th>Word</th><th>Replacement</th></tr>";
+								$count = 0;
+								if(count($wordfilters) > 0)
+								{
+									foreach($wordfilters as $wordfilter_id => $wordfilter_data)
+									{
+										echo "<tr>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2")."><input type=checkbox name=wordfilters[] value=".$wordfilter_data['id']."></td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$wordfilter_data['board']."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$wordfilter_data['word']."</td>";
+											echo "<td class=".($count % 2 == 0 ? "td1" : "td2").">".$wordfilter_data['replacement']."</td>";
+										echo "</tr>";
+										$count++;
+									}
+								}
+								else
+								{
+									echo "<tr><td class=td1 colspan=5>No wordfilters found.</td></tr>";
+								}
+								echo "</table>";
+							echo "</p>";
+							echo "<input type=submit name=action value='Delete wordfilters'>";
+						echo "</form>";
+					break;
+				}
+			}
+			else
+			{
+				echo "<form method=get>";
+					echo "<input type=hidden name=action value=manage>";
+					echo "<input type=submit name=subaction value='Unban User'>";
+					echo "<input type=submit name=subaction value='Reports'>";
+					echo "<input type=submit name=subaction value='Wordfilter'>";
+				echo "</form>";
+			}
+		break;
+		case 'view_thread':
+			if(isset($_CLEAN['GET']['thread_id']) && is_numeric($_CLEAN['GET']['thread_id']))
+			{
+				echo "<b class=t><a href={$cfg[$board]['webpath']}>{$cfg[$board]['title']}</a></b>".(strlen($cfg[$board]['desc']) > 0 ? " - <small>{$cfg[$board]['desc']}</small>" : "");
+				echo $hr;
+				echo "<b class=ls>{$HTML->build_menu()}</b>";
+				echo $hr;
+				if(isset($_CLEAN['GET']['error']) && isset($common->errors[$_CLEAN['GET']['error']]))
+				{
+					echo "<b><font color=red>{$common->errors[$_CLEAN['GET']['error']]}</font></b>";
+					echo $hr;
+				}
+				if($Sutaba->is_thread($_CLEAN['GET']['thread_id']))
+				{
+					$thread_data = $Sutaba->get_thread($_CLEAN['GET']['thread_id']);
+					if(($thread_data['locked'] == 0) || ($thread_data['locked'] == 1 && $common->is_staff()))
+					{
+						echo $HTML->build_form($thread_data);
+						echo $hr;
+					}
+					echo "<form method=post name=moderate enctype=multipart/form-data>";
+						echo '<div id=msg>';
+							echo $HTML->build_post($thread_data);
+							foreach($thread_data['replies'] as $post)
+							{
+								$post['report_count'] = $Sutaba->get_report_count($post['id']);
+								echo '<p>'.$HTML->build_post($post).'</p>';
+							}
+						echo '</div>';
+						echo $hr;
+						echo "<div class='r b'>";
+							echo "<input type=password name=password onfocus='this.type=\"text\"' onblur='this.type=\"password\"' value={$_SESSION[$board]['password']}>";
+							echo "<input type=submit name=action value='Delete Post'>";
+							echo "<input type=submit name=action value='Delete Image'>";
+							if($common->is_staff())
+								echo "<input type=submit name=action value=Ban>";
+							echo "<input type=submit name=action value=Report>";
+						echo "</div>";
+					echo "</form>";
+				}
+				else
+				{
+					echo "<b><font color=red>Sorry, but the thread you requested doesn't exist.</font></b>";
+					echo $hr;
+				}
+			}
+			else
+			{
+				$common->redirect('error=thread_not_found');
+			}
+		break;
+		default:
+			$page = (isset($_CLEAN['GET']['page']) && is_numeric($_CLEAN['GET']['page']) && 0 < $_CLEAN['GET']['page'] ? $_CLEAN['GET']['page'] : 1);
+			$posts = $Sutaba->get_thread(false,$page);
+			$paginate->thread_count = $Sutaba->get_thread_count();
+			$paginate->current_page = $page;
+			echo "<b class=t>";
+			if($_SERVER['REQUEST_URI'] !== $cfg[$board]['webpath'])
+				echo "<a href={$cfg[$board]['webpath']}>{$cfg[$board]['title']}</a>";
+			else
+				echo $cfg[$board]['title'];
+			echo "</b>".(strlen($cfg[$board]['desc']) > 0 ? " - <small>{$cfg[$board]['desc']}</small>" : "");
+			echo $hr;
+			echo "<b class=ls>{$HTML->build_menu()}</b>";
+			echo $hr;
+			if(isset($_CLEAN['GET']['error']) && isset($common->errors[$_CLEAN['GET']['error']]))
+			{
+				echo "<b><font color=red>{$common->errors[$_CLEAN['GET']['error']]}</font></b>";
+				echo $hr;
+			}
+			echo $HTML->build_form();
+			echo $hr;
+			//check for messages
+			echo "<form method=post name=moderate enctype=multipart/form-data>";
+				echo "<div id=msg>";
+					echo "<table width=100% border=1 cellpadding=5 class=tbl>";
+						echo "<tr><td class=td2><b><div style=float:right>Replies</div>Title</b></td></tr>";
+						if(0 < count($posts))
+						{
+							$count = 0;
+							foreach($posts as $post)
+							{
+								$replies = count($post['replies']);
+								echo "<tr>";
+									echo "<td class=td".($count % 2 ? 2 : 1).">";
+									echo "<div style=float:right>{$replies}</div>";
+									echo "<input type=checkbox name=posts[] value={$post['id']}>";
+									echo "<a href=?action=view_thread&thread_id={$post['id']}>{$post['subject']}</a>";
+									if($post['file'] !== '')
+										echo " <img src=image.gif title=Image width=10 height=10 alt=I>";
+									if($post['locked'] == 1)
+										echo " <img src=lock.gif title=Locked width=10 height=10 alt=L>";
+									if($post['pinned'] == 1)
+										echo " <img src=pin.gif title=Pinned width=10 height=10 alt=P>";
+									echo "</td>";
+								echo "</tr>";
+								$count++;
+							}
+						}
+						else
+						{
+							echo "<tr><td class=td1>No posts found in this board.</td></tr>";
+						}
+					echo "</table>";
+				echo "</div>";
+				echo $hr;
+				echo "<div class='r b'>";
+					echo "<input type=password name=password id=moderate_input onfocus='this.type=\"text\"' onblur='this.type=\"password\"' value={$_SESSION[$board]['password']}>";
+					echo "<input type=submit name=action value='Delete Post'>";
+					echo "<input type=submit name=action value='Delete Image'>";
+					if($common->is_admin())
+						echo "<input type=submit name=action value='Toggle Pin'>";
+					if($common->is_staff())
+					{
+						echo "<input type=submit name=action value='Toggle Lock'>";
+						echo "<input type=submit name=action value='Ban'>";
+					}
+				echo "</div>";
+				echo "<div class=p>";
+					echo $paginate->paginate();
+				echo "</div>";
+			echo "</form>";
+		break;
+	}
+}
+$output = ob_get_contents();
+ob_end_clean();
+

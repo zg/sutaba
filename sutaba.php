@@ -839,3 +839,191 @@ class Sutaba {
 	}
 }
 
+class common {
+	public $errors = array (
+		'thread_doesnt_exist' => 'The thread you tried to request does not exist.',
+		'thread_locked'       => 'The thread you tried to reply to is locked.',
+		'wait'                => 'Please wait before attempting to post again.',
+		'invalid_filetype'    => 'The file you uploaded contains an invalid/unsupported filetype.',
+		'file_too_large'      => 'The file you uploaded is too large.',
+		'board_not_found'     => 'The board you specified could not be found or you do not have permission to view it.',
+		'password_missing'    => 'You must input a password to delete a post or image.',
+		'thread_not_found'    => 'The thread you specified could not be found or you do not have permission to view it.',
+		'image_required'      => 'An image is required to start a new thread.'
+	);
+
+	public function clean($elem)
+	{
+		if(!is_array($elem))
+			$elem = htmlentities($elem,ENT_QUOTES | ENT_IGNORE,'UTF-8',false);
+		else
+			foreach ($elem as $key => $value)
+				$elem[$key] = $this->clean($value);
+		return $elem;
+	}
+
+	public function validate_email($email,$return=false)
+	{
+		return (preg_match("/([0-9a-z][-_.]?[0-9a-z]*)@([0-9a-z][-.]?[0-9a-z]*\\.[a-z]{2,3})/",$email,$match)?($return?$match:true):false);
+	}
+
+	public function format_size($size,$decimals=1)
+	{
+		$suffix = array('B','KB','MB','GB','TB','PB','EB','ZB','YB','NB','DB');
+		$index = 0;
+		while($size >= 1024 && ($index < count($suffix) - 1))
+		{
+			$size /= 1024;
+			$index++;
+		}
+		return round($size, $decimals).' '.$suffix[$index];
+	}
+
+	public function redirect($location,$maintain_GET=false,$html=false,$wait=0)
+	{
+		$redirect_to = array();
+		$location = str_replace('?','',$location);
+		if($maintain_GET === true)
+		{
+			global $_CLEAN;
+			foreach($_CLEAN['GET'] as $index => $value)
+				$redirect_to[$index] = $value;
+		}
+		$implode_array = array();
+		foreach($redirect_to as $index => $value)
+			$implode_array[] = $index.'='.$value;
+		$redirect_to = implode('&',$implode_array);
+		if($html)
+			return '<meta http-equiv="refresh" content="'.$wait.';?'.$location.'" />';
+		else
+			header('Location: ?'.(strpos($redirect_to,$location) ? $redirect_to : $redirect_to.(0 < strlen($redirect_to) ? '&' : '').$location));
+	}
+
+	public function is_admin()
+	{
+		$return_val = false;
+		global $common,$cfg,$board;
+		if(!isset($cfg) || !isset($board) || !isset($cfg[$board]))
+			return $return_val;
+		if(!isset($_SESSION[$board]['name']))
+			return $return_val;
+
+		if(strpos($_SESSION[$board]['name'],'#'))
+		{
+			list($name,$tripcode) = explode('#',$_SESSION[$board]['name'],2);
+			if(in_array($this->generate_tripcode($tripcode),$cfg[$board]['access']['admin']))
+				$return_val = true;
+		}
+
+		return $return_val;
+	}
+
+	public function is_mod()
+	{
+		$return_val = false;
+		global $common,$cfg,$board;
+		if(!isset($cfg) || !isset($board) || !isset($cfg[$board]))
+			return $return_val;
+		if(!isset($_SESSION[$board]['name']))
+			return $return_val;
+
+		if(strpos($_SESSION[$board]['name'],'#'))
+		{
+			list($name,$tripcode) = explode('#',$_SESSION[$board]['name'],2);
+			if(in_array($this->generate_tripcode($tripcode),$cfg[$board]['access']['mod']))
+				$return_val = true;
+		}
+
+		return $return_val;
+	}
+
+	public function is_staff()
+	{
+		return ($this->is_admin() || $this->is_mod());
+	}
+
+	public function has_permission($board)
+	{
+		global $cfg,$_CLEAN;
+		if($cfg[$board]['permissions'] == 'all')
+			return true;
+		if(in_array($_SERVER['REMOTE_ADDR'],$cfg[$board]['permissions']))
+			return true;
+		//cookie check for valid tripcode
+		return false;
+	}
+
+	public function generate_tripcode($password)
+	{
+		$password = mb_convert_encoding($password,'SJIS','UTF-8');
+		$password = str_replace(array('&','"',"'",'<','>'),array('&amp;','&quot;','&#39;','&lt;','&gt;'),$password);
+		$salt = substr($password.'H.',1,2);
+		$salt = preg_replace('/[^.\/0-9:;<=>?@A-Z\[\\\]\^_`a-z]/','.',$salt);
+		$salt = strtr($salt,':;<=>?@[\]^_`','ABCDEFGabcdef');
+		return substr(crypt($password,$salt),-10);
+	}
+
+	public function generate_password($length=16,$params=array('nums'=>true,'alpha'=>true,'cap_alpha'=>true,'special'=>true))
+	{
+		$password = '';
+		$characters = array();
+		if($params['nums'] === true)
+			foreach(range(0,9) as $number)
+				$characters[] = $number;
+		if($params['alpha'] === true)
+			foreach(range('a','z') as $alpha)
+				$characters[] = $alpha;
+		if($params['cap_alpha'] === true)
+			foreach(range('A','Z') as $alpha)
+				$characters[] = $alpha;
+		if($params['special'] === true)
+			foreach(array('!','@','$','*','-','_','+','=') as $special)
+				$characters[] = $special;
+		for($index = 0; $index < $length; $index++)
+			$password .= $characters[mt_rand(0,(count($characters) - 1))];
+		return $password;
+	}
+	
+	public function relative_time($date)
+	{
+		$diff = time() - strtotime($date);
+		$plural = function($diff,$negative=false){
+			return ($negative ? (-$diff == 1 ? '' : 's') : ($diff == 1 ? '' : 's'));
+		};
+		if($diff > 0)
+		{
+			if($diff < 60)
+				return $diff . " second" . $plural($diff) . " ago";
+			$diff = round($diff / 60);
+			if($diff < 60)
+				return $diff . " minute" . $plural($diff) . " ago";
+			$diff = round($diff / 60);
+			if($diff < 24)
+				return $diff . " hour" . $plural($diff) . " ago";
+			$diff = round($diff / 24);
+			if($diff < 7)
+				return $diff . " day" . $plural($diff) . " ago";
+			$diff = round($diff / 7);
+			if($diff < 4)
+				return $diff . " week" . $plural($diff) . " ago";
+			return "on " . date("F j, Y", strtotime($date));
+		} else {
+			if($diff > -60)
+				return "in about " . -$diff . " second" . $plural($diff,true);
+			$diff = round($diff / 60);
+			if ($diff > -60)
+				return "in about " . -$diff . " minute" . $plural($diff,true);
+			$diff = round($diff / 60);
+			if ($diff > -24)
+				return "in about " . -$diff . " hour" . $plural($diff,true);
+			$diff = round($diff / 24);
+			if ($diff > -7)
+				return "in about " . -$diff . " day" . $plural($diff,true);
+			$diff = round($diff / 7);
+			if ($diff > -4)
+				return "in about " . -$diff . " week" . $plural($diff,true);
+			return "on " . date("F j, Y", strtotime($date));
+		}
+	}
+}
+

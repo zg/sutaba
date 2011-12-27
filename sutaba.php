@@ -1185,3 +1185,29 @@ class HTML {
 	}
 }
 
+class paginate {
+	public $thread_count, $threads_per_page;
+	public $page_range = 5;
+	public $current_page = 1;
+
+	public function __construct()
+	{
+		global $cfg,$board;
+		$this->threads_per_page = $cfg[$board]['threads_per_page'];
+	}
+
+	public function paginate()
+	{
+		$return_val = '';
+		if($this->thread_count == 0)
+			return $return_val;
+		for($page = 1; $page < ceil($this->thread_count / $this->threads_per_page); $page++)
+			$return_val .= ($this->current_page == $page ? ' [ <b>'.$page.'</b> ] ' : ' [ <a href=?page='.$page.'>'.$page.'</a> ] ');
+		return $return_val;
+	}
+}
+
+$common = new common();
+$_CLEAN['GET'] = $common->clean($_GET);
+$_CLEAN['POST'] = $common->clean($_POST);
+

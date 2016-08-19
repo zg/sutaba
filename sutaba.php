@@ -6,7 +6,7 @@
 date_default_timezone_set('America/New_York');
 $cfg = array (
     'board1' => array (
-        'syspath'          => '/srv/http/org/sutaba/'
+        'syspath'          => '/srv/http/org/sutaba/',
         'thumbpath'        => 'thumb/',
         'imgpath'          => 'src/',
         'webpath'          => '/', // relative path from the domain; i.e.: http://www.example.com/sutaba/ means this variable would be 'sutaba/'
